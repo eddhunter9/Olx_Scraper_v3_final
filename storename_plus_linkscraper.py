@@ -30,7 +30,12 @@ from openpyxl.styles import Font, PatternFill, Alignment
 #CATEGORY_URL = "https://www.olx.pl/dla-firm/maszyny-i-urzadzenia/"
 #CATEGORY_URL = "https://www.olx.pl/muzyka-edukacja/muzyka/"
 #CATEGORY_URL = "https://www.olx.pl/muzyka-edukacja/instrumenty/"
-CATEGORY_URL = "https://www.olx.pl/dom-ogrod/budowa/"
+#CATEGORY_URL = "https://www.olx.pl/dom-ogrod/budowa/"
+#CATEGORY_URL = "https://www.olx.pl/motoryzacja/budowlane/"
+#CATEGORY_URL = "https://www.olx.pl/motoryzacja/samochody/"
+#CATEGORY_URL = "https://www.olx.pl/motoryzacja/pozostala-motoryzacja/"
+#CATEGORY_URL = "https://www.olx.pl/dla-firm/czesci-do-maszyn-i-urzadzen/"
+CATEGORY_URL = "https://www.olx.pl/motoryzacja/car-audio/"
 MAX_PAGES    = 1
 
 # === INICJALIZACJA WEBDRIVERA ===
@@ -43,10 +48,7 @@ def get_webdriver():
     opts.add_argument("--window-size=1920,1080")
     return webdriver.Chrome(service=service, options=opts)
 
-def get_shop_info_improved(listing_url):
-    """
-    Ulepszona wersja - rozróżnia sklepy premium od zwykłych użytkowników
-    """
+def quick_get_profile_url(listing_url):
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
@@ -59,35 +61,74 @@ def get_shop_info_improved(listing_url):
         driver.get(listing_url)
         time.sleep(5)
 
-        #wczesniejsza deklaracja słownika
-        #shop_info = {}
+        try:
+            # Ten link prowadzi do profilu sprzedawcy
+            more_link = driver.find_element(By.PARTIAL_LINK_TEXT, "Więcej od tego ogłoszeniodawcy")
+            profile_url = more_link.get_attribute('href')
+            return profile_url, more_link
+        except Exception:
+            return None
+    except Exception:
+        return None
 
-        # Inicjalizacja struktury danych z domyślnymi wartościami
+
+def get_shop_info_improved(listing_url, seen:set, treshold=100):
+    """
+    Ulepszona wersja - rozróżnia sklepy premium od zwykłych użytkowników
+    """
+    chrome_options = Options()
+    chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+
+    driver = webdriver.Chrome(options=chrome_options)
+
+    try:
+    #     print(f"\nŁadowanie strony: {listing_url}")
+    #     driver.get(listing_url)
+    #     time.sleep(5)
+
+    # Inicjalizacja struktury danych z domyślnymi wartościami
+    # Musi być na poczatku!
         shop_record = {
             'profile_url': None,
             'ads_count': None,
             'name': None,
             'type': None,
-            #'source_listing': listing_url  # Dodatkowe pole - z jakiego ogłoszenia pobrano dane
         }
-
         # Najpierw sprawdź czy to sklep premium (ma parametr w URL)
         is_premium_shop = 'olx_shop_premium' in listing_url
 
         # Metoda 1: Szukaj linku "Więcej od tego ogłoszeniodawcy"
         try:
-            # Ten link prowadzi do profilu sprzedawcy
-            more_link = driver.find_element(By.PARTIAL_LINK_TEXT, "Więcej od tego ogłoszeniodawcy")
-            profile_url = more_link.get_attribute('href')
+            # # Ten link prowadzi do profilu sprzedawcy
+            # more_link = driver.find_element(By.PARTIAL_LINK_TEXT, "Więcej od tego ogłoszeniodawcy")
+            # profile_url = more_link.get_attribute('href')
+
+            # WARIANT1 SKIP
+            profile_url, more_link=quick_get_profile_url(listing_url)
+            # 1) Filtr profilu
+            if not profile_url:
+                print(f"   ❌ Brak profile_url w szybkim fetchu – skip {listing_url}")
+                return {}
+            # 2) Filtr duplikatów
+            if profile_url in seen:
+                print(f"   ⚠ Duplikat {profile_url} – skip")
+                return {}
+            # Teraz wiemy, że to nowy URL
+            seen.add(profile_url)
 
             if profile_url:
+                ads_count = ctc_get_olx_ads_count(profile_url)  # LICZBA OGLOSZEN
+                #Ponizej progu ma nie przepuscic sklepu dalej - optymalizacja czasu
+                if ads_count < treshold:
+                    return {}
+                    #return None
+
                 shop_record['profile_url'] = profile_url
                 print(f"  ✓ Link do profilu: {profile_url}")
 
-                #Zmiana: podstawienie funkcji z claude_to_csv
-                #get_olx_ads_count nieaktywne
-                ads_count = ctc_get_olx_ads_count(profile_url)  # LICZBA OGLOSZEN
-                #mozna tez dać dodawanie ads_count do shop record bez warunku tutaj
+                # mozna tez dać dodawanie ads_count do shop record bez warunku tutaj
                 if ads_count is not None:
                     shop_record['ads_count'] = ads_count #brakowało tej linii!
                     print(f"Liczba ogłoszeń: {ads_count}")
@@ -241,14 +282,12 @@ def extract_ad_links(driver, category_url, max_pages, test_mode=False):
 
 
 def extract_store_urls(driver, ad_links):
-
+    seen=set()
     store_urls={}
 
     for ad in ad_links:
-        print(f"🔗 Opening ad: {ad}")
-        # get_shop_info_improved otworzy swoją własną przeglądarkę
-        # podmiana na funkcje z ctc
-        shop_record = get_shop_info_improved(ad)
+        #print(f"🔗 Opening ad: {ad}")
+        shop_record = get_shop_info_improved(ad, seen) #treshold nie trzeba tu podać?
 
         # Dodaj rekord do listy (nawet jeśli niepełny)
         #all_shop_records.append(shop_record)
@@ -263,13 +302,10 @@ def extract_store_urls(driver, ad_links):
         else:
             print("   Brak profile_url w shop_info")
 
-        #print(f"   Typ: {shop_record.get('type', 'nieznany')}")
-
         time.sleep(1) #potrzebne?
 
     print(f"⚡ Found {len(store_urls)} unique stores")
-    #print(f"📊 Collected {len(all_shop_records)} shop records")
-    #return list(store_urls), all_shop_records
+
     return store_urls
 
 def ctc_get_olx_ads_count_selenium(shop_url):
@@ -444,6 +480,8 @@ def process_urls_to_xlsx(store_data, output_filename="olx_sellers.xlsx"):
 
 # === GŁÓWNA FUNKCJA ===
 def main():
+    start_time = time.time()  # Czas rozpoczęcia
+
     driver = get_webdriver()
     try:
         ad_links   = extract_ad_links(driver, CATEGORY_URL, MAX_PAGES, test_mode=False)
@@ -478,6 +516,11 @@ def main():
 
     # Przetwórz URL-e i zapisz do XLSX
     process_urls_to_xlsx(store_data, output_file)
+
+    # Oblicz i wyświetl czas wykonania
+    end_time = time.time()
+    execution_time = end_time - start_time
+    print(f"\n⏱️  CZAS WYKONANIA: {execution_time:.1f} sekund ({execution_time / 60:.1f} minut)")
 
 if __name__ == '__main__':
     main()
