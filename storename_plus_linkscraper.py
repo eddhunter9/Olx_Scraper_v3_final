@@ -18,6 +18,11 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 
+#Timeout
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
+
 #MODUŁY
 # from claude_to_csv import process_urls_to_xlsx
 # from claude_to_csv import get_shop_name_from_url
@@ -25,18 +30,10 @@ from openpyxl.styles import Font, PatternFill, Alignment
 # from claude_to_csv import ctc_get_olx_ads_count_selenium
 
 # === KONFIGURACJA ===
-#CATEGORY_URL = "https://www.olx.pl/elektronika/sprzet-audio/"
-#CATEGORY_URL = "https://www.olx.pl/dom-ogrod/instalacje/"
-#CATEGORY_URL = "https://www.olx.pl/dla-firm/maszyny-i-urzadzenia/"
-#CATEGORY_URL = "https://www.olx.pl/muzyka-edukacja/muzyka/"
-#CATEGORY_URL = "https://www.olx.pl/muzyka-edukacja/instrumenty/"
-#CATEGORY_URL = "https://www.olx.pl/dom-ogrod/budowa/"
-#CATEGORY_URL = "https://www.olx.pl/motoryzacja/budowlane/"
-#CATEGORY_URL = "https://www.olx.pl/motoryzacja/samochody/"
-#CATEGORY_URL = "https://www.olx.pl/motoryzacja/pozostala-motoryzacja/"
-#CATEGORY_URL = "https://www.olx.pl/dla-firm/czesci-do-maszyn-i-urzadzen/"
-CATEGORY_URL = "https://www.olx.pl/motoryzacja/car-audio/"
-MAX_PAGES    = 1
+#CATEGORY_URL = "https://www.olx.pl/elektronika/komputery/"
+#CATEGORY_URL = "https://www.olx.pl/elektronika/sprzet-agd/"
+CATEGORY_URL = "https://www.olx.pl/dom-ogrod/ogrod/"
+MAX_PAGES    = 2
 
 # === INICJALIZACJA WEBDRIVERA ===
 def get_webdriver():
@@ -48,45 +45,173 @@ def get_webdriver():
     opts.add_argument("--window-size=1920,1080")
     return webdriver.Chrome(service=service, options=opts)
 
+#WARIANT1 time_optim - nie wykrywa kont uzytkownikow!
+# def quick_get_profile_url(listing_url):
+#     chrome_options = Options()
+#     chrome_options.add_argument('--headless')
+#     chrome_options.add_argument('--no-sandbox')
+#     chrome_options.add_argument('--disable-dev-shm-usage')
+#     #dodane przy time optim:
+#     chrome_options.add_argument('--disable-images')
+#     chrome_options.add_argument('--disable-css')
+#     chrome_options.add_argument('--disable-plugins')
+#     chrome_options.add_argument('--disable-extensions')
+#     chrome_options.add_argument('--no-first-run')
+#     chrome_options.add_argument('--disable-default-apps')
+#
+#     driver = webdriver.Chrome(options=chrome_options)
+#
+#     try:
+#         driver.set_page_load_timeout(8) #time_optim
+#         print(f"\nŁadowanie strony: {listing_url}")
+#         driver.get(listing_url)
+#         #time.sleep(5) #time_optim
+#
+#         try:
+#             # Ten link prowadzi do profilu sprzedawcy
+#             more_link = driver.find_element(By.PARTIAL_LINK_TEXT, "Więcej od tego ogłoszeniodawcy")
+#             profile_url = more_link.get_attribute('href')
+#             return profile_url, more_link
+#         except:
+#             pass
+#     #     except Exception:
+#     #         return None
+#     # except Exception:
+#     #     return None
+#         wait=WebDriverWait(driver,3)
+#         more_link=wait.until(
+#             EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, "Więcej od tego ogłoszeniodawcy"))
+#         )
+#         profile_url = more_link.get_attribute('href')
+#         return profile_url, more_link
+#     except:
+#         return None, None
+#     finally:
+#         driver.quit()
+
+# WARIANT2 time_optim - lepszy niz 1!
 def quick_get_profile_url(listing_url):
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
+    #dodane przy time optim:
+    chrome_options.add_argument('--disable-images')
+    chrome_options.add_argument('--disable-css')
+    chrome_options.add_argument('--disable-plugins')
+    chrome_options.add_argument('--disable-extensions')
+    chrome_options.add_argument('--no-first-run')
+    chrome_options.add_argument('--disable-default-apps')
 
     driver = webdriver.Chrome(options=chrome_options)
 
     try:
+        #claude sonnet proponuje tu set_page_load
+        driver.set_page_load_timeout(6) # Dotyczy ładowania strony
         print(f"\nŁadowanie strony: {listing_url}")
         driver.get(listing_url)
-        time.sleep(5)
+        #time.sleep(5) #time_optim
+        wait = WebDriverWait(driver, 2) # Dotyczy szukania elementu na juz załadowanej stronie
+        more_link = wait.until(
+            EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, "Więcej od tego ogłoszeniodawcy")) # maja byc podwojne nawiasy okragle!
+        )
+        profile_url = more_link.get_attribute('href')
+        return profile_url, more_link, driver
 
-        try:
-            # Ten link prowadzi do profilu sprzedawcy
-            more_link = driver.find_element(By.PARTIAL_LINK_TEXT, "Więcej od tego ogłoszeniodawcy")
-            profile_url = more_link.get_attribute('href')
-            return profile_url, more_link
-        except Exception:
-            return None
-    except Exception:
-        return None
+    except TimeoutException:
+        print(f"Timeout - nie znaleziono linku w {listing_url}")
+        driver.quit()
+        return None, None, None
+    except Exception as e:
+        print(f"Błąd {e}")
+        driver.quit()
+        return None, None, None
+    #Bez finally bo nie pobierze nazwy!
+    # finally:
+    #     driver.quit()
+
+# WARIANT3 fallback JS a potem selenium - komplikuje przekazanie more_link
+# def quick_get_profile_url(listing_url):
+#     chrome_options = Options()
+#     chrome_options.add_argument('--headless')
+#     chrome_options.add_argument('--no-sandbox')
+#     chrome_options.add_argument('--disable-dev-shm-usage')
+#     #dodane przy time optim:
+#     chrome_options.add_argument('--disable-images')
+#     chrome_options.add_argument('--disable-css')
+#     chrome_options.add_argument('--disable-plugins')
+#     chrome_options.add_argument('--disable-extensions')
+#     chrome_options.add_argument('--no-first-run')
+#     chrome_options.add_argument('--disable-default-apps')
+#
+#     driver = webdriver.Chrome(options=chrome_options)
+#
+#     try:
+#         #claude sonnet proponuje tu set_page_load
+#         driver.set_page_load_timeout(8) # Dotyczy ładowania strony
+#         print(f"\nŁadowanie strony: {listing_url}")
+#         driver.get(listing_url)
+#
+#         # potrzebne? Krótkie oczekiwanie na załadowanie DOM
+#         #time.sleep(1.5)
+#
+#         # Metoda1: JavaScript (szybka)
+#         try:
+#             profile_url = driver.execute_script("""
+#                         const link = document.querySelector('a[href*="/oferty/uzytkownik/"], a[href*="/sklepy/"], a[href*=".olx.pl/home/"]');
+#                         return link ? link.href : null;
+#                     """)
+#             #mozna tez dodać usuwanie parametrow url
+#
+#             if profile_url:
+#                 print(f"  ✅ JS znalazł: {profile_url}")
+#                 # Spróbuj znaleźć more_link dla nazwy
+#                 try:
+#                     more_link = driver.find_element(By.PARTIAL_LINK_TEXT, "Więcej od tego ogłoszeniodawcy")
+#                     return profile_url, more_link
+#                 except:
+#                     return profile_url, None
+#             else:
+#                 print("  → JS nie znalazł, próbuję Selenium...")
+#
+#         except Exception as js_error:
+#             print(f"  → Błąd JS, próbuję Selenium: {js_error}")
+#
+#         # Metoda2: Selenium fallback
+#         try:
+#             wait = WebDriverWait(driver, 3) # Dotyczy szukania elementu na juz załadowanej stronie
+#             more_link = wait.until(
+#                 EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, "Więcej od tego ogłoszeniodawcy")) # maja byc podwojne nawiasy okragle!
+#             )
+#             profile_url = more_link.get_attribute('href')
+#             # tu tez mozna wprowadzic usuwanie parametrow url tak jak w js
+#             print(f"  ✅ Selenium znalazł: {profile_url}")
+#             return profile_url, more_link
+#
+#         except TimeoutException:
+#             print(f"Selenium timeout - nie znaleziono linku w {listing_url}")
+#             return None, None
+#
+#     except Exception as e:
+#         print(f"Błąd glowny {e}")
+#         return None, None
+#     finally:
+#         driver.quit()
 
 
 def get_shop_info_improved(listing_url, seen:set, treshold=100):
     """
     Ulepszona wersja - rozróżnia sklepy premium od zwykłych użytkowników
     """
-    chrome_options = Options()
-    chrome_options.add_argument('--headless')
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
-
-    driver = webdriver.Chrome(options=chrome_options)
+    # przekazanie drivera z quick_get
+    # chrome_options = Options()
+    # chrome_options.add_argument('--headless')
+    # chrome_options.add_argument('--no-sandbox')
+    # chrome_options.add_argument('--disable-dev-shm-usage')
+    #
+    # driver = webdriver.Chrome(options=chrome_options)
 
     try:
-    #     print(f"\nŁadowanie strony: {listing_url}")
-    #     driver.get(listing_url)
-    #     time.sleep(5)
 
     # Inicjalizacja struktury danych z domyślnymi wartościami
     # Musi być na poczatku!
@@ -101,14 +226,12 @@ def get_shop_info_improved(listing_url, seen:set, treshold=100):
 
         # Metoda 1: Szukaj linku "Więcej od tego ogłoszeniodawcy"
         try:
-            # # Ten link prowadzi do profilu sprzedawcy
-            # more_link = driver.find_element(By.PARTIAL_LINK_TEXT, "Więcej od tego ogłoszeniodawcy")
-            # profile_url = more_link.get_attribute('href')
 
             # WARIANT1 SKIP
-            profile_url, more_link=quick_get_profile_url(listing_url)
+            profile_url, more_link, driver = quick_get_profile_url(listing_url)
             # 1) Filtr profilu
             if not profile_url:
+                #Early return
                 print(f"   ❌ Brak profile_url w szybkim fetchu – skip {listing_url}")
                 return {}
             # 2) Filtr duplikatów
@@ -135,21 +258,26 @@ def get_shop_info_improved(listing_url, seen:set, treshold=100):
                 else:
                     print("Nie udało się pobrać liczby ogłoszeń.")
 
-                # Teraz musimy pobrać nazwę sprzedawcy
-                # Nazwa powinna być gdzieś obok tego linku
-                parent = more_link.find_element(By.XPATH, "../..")
-
-                # Szukaj nazwy w rodzicu
-                name_elements = parent.find_elements(By.CSS_SELECTOR, "h2, h3, h4, strong")
-                for elem in name_elements:
-                    text = elem.text.strip()
-                    if text and text != "Więcej od tego ogłoszeniodawcy" and len(text) < 100:
-                        shop_record['name'] = text
-                        print(f"  ✓ Nazwa: {text}")
-                        break
+                # POBIERANIE NAZWY - ZABEZPIECZONE
+                try:
+                    if more_link:
+                    # Sprawdź czy more_link jest nadal aktywny
+                        # Teraz musimy pobrać nazwę sprzedawcy
+                        # Nazwa powinna być gdzieś obok tego linku
+                        parent = more_link.find_element(By.XPATH, "../..")
+                        # Szukaj nazwy w rodzicu
+                        name_elements = parent.find_elements(By.CSS_SELECTOR, "h2, h3, h4, strong")
+                        for elem in name_elements:
+                            text = elem.text.strip()
+                            if text and text != "Więcej od tego ogłoszeniodawcy" and len(text) < 100:
+                                shop_record['name'] = text
+                                print(f"  ✓ Nazwa: {text}")
+                                break
+                except:
+                    pass
         except:
             pass
-
+        '''
         # Metoda 2: JavaScript - bardziej precyzyjne szukanie (POPRAWIONE)
         if 'profile_url' not in shop_record or 'name' not in shop_record:
             try:
@@ -231,12 +359,25 @@ def get_shop_info_improved(listing_url, seen:set, treshold=100):
                         print(f"  ✓ Nazwa z tytułu: {shop_record['name']}")
 
         # Określ typ konta
-        if 'profile_url' in shop_record:
-            if '/sklepy/' in shop_record['profile_url'] or '.olx.pl/home/' in shop_record['profile_url']:
-                shop_record['type'] = 'sklep_premium'
-            elif '/oferty/uzytkownik/' in shop_record['profile_url']:
-                shop_record['type'] = 'uzytkownik'
+        # if 'profile_url' in shop_record:
+        #     # Uwaga wrazliwa linia!
+        #     if '/sklepy/' in shop_record['profile_url'] or '.olx.pl/home/' in shop_record['profile_url']:
+        #         shop_record['type'] = 'sklep_premium'
+        #     elif '/oferty/uzytkownik/' in shop_record['profile_url']:
+        #         shop_record['type'] = 'uzytkownik'
 
+    # Określ typ konta - POPRAWIONE
+        profile_rec = shop_record.get('profile_url')
+        if profile_rec:
+            if '/sklepy/' in profile_rec or '.olx.pl/home/' in profile_rec:
+                shop_record['type'] = 'sklep_premium'
+            elif '/oferty/uzytkownik/' in profile_rec:
+                shop_record['type'] = 'uzytkownik'
+            else:
+                shop_record['type'] = 'nieznany'
+        else:
+            shop_record['type'] = 'brak_profilu'
+'''
         return shop_record
 
     except Exception as e:
@@ -245,7 +386,11 @@ def get_shop_info_improved(listing_url, seen:set, treshold=100):
         traceback.print_exc()
         return {}
     finally:
-        driver.quit()
+        #if 'driver' in locals() and driver:
+        try:
+            driver.quit()
+        except:
+            pass
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
