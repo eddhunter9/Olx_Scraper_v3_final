@@ -27,10 +27,14 @@ from selenium.common.exceptions import TimeoutException
 #CATEGORY_URL = "https://www.olx.pl/elektronika/komputery/"
 #CATEGORY_URL = "https://www.olx.pl/elektronika/sprzet-agd/"
 #CATEGORY_URL = "https://www.olx.pl/dom-ogrod/ogrod/"
-CATEGORY_URL = "https://www.olx.pl/uslugi/budowa-remont/"
+#CATEGORY_URL = "https://www.olx.pl/uslugi/budowa-remont/"
+CATEGORY_URL = "https://www.olx.pl/elektronika"
 #MAX_PAGES    = 3
 START_PAGE=1
 END_PAGE=1
+
+#Tryb testowy - 5 linków i koniec
+TEST_MODE=False
 
 # === INICJALIZACJA WEBDRIVERA ===
 def get_webdriver():
@@ -60,7 +64,8 @@ def quick_get_profile_url(listing_url):
 
     try:
         #claude sonnet proponuje tu set_page_load
-        driver.set_page_load_timeout(6) # Dotyczy ładowania strony
+        # ograniczenie czasowe 4+1 sek.
+        driver.set_page_load_timeout(5) # Dotyczy ładowania strony
         print(f"\nŁadowanie strony: {listing_url}")
         driver.get(listing_url)
         #time.sleep(5) #time_optim
@@ -83,8 +88,8 @@ def quick_get_profile_url(listing_url):
     # finally:
     #     driver.quit()
 
-
-def get_shop_info_improved(listing_url, seen:set, treshold=100):
+# WQ bez seen:set
+def get_shop_info_improved(listing_url, treshold=100):
     """
     Ulepszona wersja - rozróżnia sklepy premium od zwykłych użytkowników
     """
@@ -111,8 +116,16 @@ def get_shop_info_improved(listing_url, seen:set, treshold=100):
 
         # Metoda 1: Szukaj linku "Więcej od tego ogłoszeniodawcy"
         try:
+            #WERSJA QUICK
+            profile_url, more_link, driver = quick_get_profile_url(listing_url)
+            # 1) Filtr profilu
+            if not profile_url:
+                # Early return
+                print(f"   ❌ Brak profile_url w szybkim fetchu – skip {listing_url}")
+                return {}
 
             # WARIANT1 SKIP
+            '''
             profile_url, more_link, driver = quick_get_profile_url(listing_url)
             # 1) Filtr profilu
             if not profile_url:
@@ -125,6 +138,7 @@ def get_shop_info_improved(listing_url, seen:set, treshold=100):
                 return {}
             # Teraz wiemy, że to nowy URL
             seen.add(profile_url)
+            '''
 
             if profile_url:
                 ads_count = ctc_get_olx_ads_count(profile_url)  # LICZBA OGLOSZEN
@@ -204,7 +218,7 @@ HEADERS = {
 
 
 # === ETAP 1: ZBIERANIE LINKÓW DO OGŁOSZEŃ ===
-def extract_ad_links(driver, category_url, start_page, end_page, test_mode=False):
+def extract_ad_links(driver, category_url, start_page, end_page, test_mode):
     ad_links = set()
     for page in range(start_page, end_page+1):
         page_url = f"{category_url}?page={page}"
@@ -230,18 +244,20 @@ def extract_ad_links(driver, category_url, start_page, end_page, test_mode=False
     print(f"⚡ Found {len(ad_links)} unique ads")
     return list(ad_links)
 
-
-def extract_store_urls(driver, ad_links):
-    seen=set()
+#WQ bez driver
+def extract_store_urls(ad_links):
+    # WERSJA QUICK - bez duplikatow
+    #seen=set()
     store_urls={}
+
+    #store_urls = set() #WQ
 
     for ad in ad_links:
         #print(f"🔗 Opening ad: {ad}")
-        shop_record = get_shop_info_improved(ad, seen) #treshold nie trzeba tu podać?
+        shop_record = get_shop_info_improved(ad) #treshold nie trzeba tu podać?
 
         # Dodaj rekord do listy (nawet jeśli niepełny)
         #all_shop_records.append(shop_record)
-
         # 2 sposoby - dodaj URL do setu jeśli istnieje
         # Użyj danych które znalazła funkcja!
         if shop_record and 'profile_url' in shop_record:
@@ -249,10 +265,10 @@ def extract_store_urls(driver, ad_links):
             key_dict = shop_record['profile_url']
             store_urls[key_dict]=shop_record
             print(f"   Dodano sklep: {key_dict} (typ: {shop_record.get('type', 'nieznany')})")
-        else:
-            print("   Brak profile_url w shop_info")
+        #else:
+         #   print("   Brak profile_url w shop_info")
 
-        time.sleep(1) #potrzebne?
+        #time.sleep(1) #potrzebne?
 
     print(f"⚡ Found {len(store_urls)} unique stores")
 
@@ -434,8 +450,8 @@ def main():
 
     driver = get_webdriver()
     try:
-        ad_links   = extract_ad_links(driver, CATEGORY_URL, START_PAGE, END_PAGE, test_mode=False)
-        store_data = extract_store_urls(driver, ad_links)
+        ad_links   = extract_ad_links(driver, CATEGORY_URL, START_PAGE, END_PAGE, TEST_MODE)
+        store_data = extract_store_urls(ad_links)
 
 
     finally:
@@ -456,6 +472,9 @@ def main():
     output_file = f"olx_sellers_v3{timestamp}.xlsx"
 
     print(f"DEBUG: Przekazuję {len(store_data)} URL-i do process_urls_to_xlsx")
+
+    # WERSJA QUICK
+    '''
     if store_data:
         first_url = list(store_data.keys())[0]
         first_record = store_data[first_url]  # Pierwszy rekord
@@ -463,7 +482,7 @@ def main():
         print(f"DEBUG: Przykładowy rekord: {first_record}")
     else:
         print("DEBUG: Słownik store_data jest pusty!")
-
+    '''
     # Przetwórz URL-e i zapisz do XLSX
     process_urls_to_xlsx(store_data, output_file)
 
