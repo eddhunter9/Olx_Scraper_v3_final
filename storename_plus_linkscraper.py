@@ -93,14 +93,6 @@ def get_shop_info_improved(listing_url, treshold=100):
     """
     Ulepszona wersja - rozróżnia sklepy premium od zwykłych użytkowników
     """
-    # przekazanie drivera z quick_get
-    # chrome_options = Options()
-    # chrome_options.add_argument('--headless')
-    # chrome_options.add_argument('--no-sandbox')
-    # chrome_options.add_argument('--disable-dev-shm-usage')
-    #
-    # driver = webdriver.Chrome(options=chrome_options)
-
     try:
 
     # Inicjalizacja struktury danych z domyślnymi wartościami
@@ -118,36 +110,31 @@ def get_shop_info_improved(listing_url, treshold=100):
         try:
             #WERSJA QUICK
             profile_url, more_link, driver = quick_get_profile_url(listing_url)
+            print(f"  CHECKPOINT 1: profile_url = {profile_url}")
             # 1) Filtr profilu
             if not profile_url:
                 # Early return
                 print(f"   ❌ Brak profile_url w szybkim fetchu – skip {listing_url}")
                 return {}
 
-            # WARIANT1 SKIP
-            '''
-            profile_url, more_link, driver = quick_get_profile_url(listing_url)
-            # 1) Filtr profilu
-            if not profile_url:
-                #Early return
-                print(f"   ❌ Brak profile_url w szybkim fetchu – skip {listing_url}")
-                return {}
-            # 2) Filtr duplikatów
-            if profile_url in seen:
-                print(f"   ⚠ Duplikat {profile_url} – skip")
-                return {}
-            # Teraz wiemy, że to nowy URL
-            seen.add(profile_url)
-            '''
-
             if profile_url:
-                ads_count = ctc_get_olx_ads_count(profile_url)  # LICZBA OGLOSZEN
+                ads_count = ctc_get_olx_ads_count(driver, profile_url)  # LICZBA OGLOSZEN
+                print(f"  CHECKPOINT 2: ads_count = {ads_count}")
                 #Ponizej progu ma nie przepuscic sklepu dalej - optymalizacja czasu
-                if ads_count < treshold:
+                # if ads_count < treshold: # Problem: None < 100 = TypeError lub False
+                #     return {}
+                # POPRAWKA: Sprawdź czy ads_count nie jest None
+                if ads_count is not None and ads_count < treshold:
+                    print(f"  ⏭️  SKIP: Za mało ogłoszeń ({ads_count})")
                     return {}
-                    #return None
+
+                # Jeśli ads_count to None, kontynuuj (może uda się pobrać inne dane)
+                if ads_count is None:
+                    print("  ⚠️  Nie udało się pobrać ads_count, ale kontynuuję...")
+
 
                 shop_record['profile_url'] = profile_url
+                print(f"  CHECKPOINT 3: shop_record['profile_url'] = {shop_record['profile_url']}")
                 print(f"  ✓ Link do profilu: {profile_url}")
 
                 # mozna tez dać dodawanie ads_count do shop record bez warunku tutaj
@@ -157,13 +144,22 @@ def get_shop_info_improved(listing_url, treshold=100):
                 else:
                     print("Nie udało się pobrać liczby ogłoszeń.")
 
+                # WRÓĆ do strony ogłoszenia żeby more_link działał
+                driver.get(listing_url)
+                time.sleep(1)
+
                 # POBIERANIE NAZWY - ZABEZPIECZONE
                 try:
                     if more_link:
+                        #WQ
+                        # Znajdź more_link ponownie (stary może być stale)
+                        fresh_more_link = driver.find_element(By.PARTIAL_LINK_TEXT, "Więcej od tego ogłoszeniodawcy")
                     # Sprawdź czy more_link jest nadal aktywny
                         # Teraz musimy pobrać nazwę sprzedawcy
                         # Nazwa powinna być gdzieś obok tego linku
-                        parent = more_link.find_element(By.XPATH, "../..")
+                        #WQ
+                        #parent = more_link.find_element(By.XPATH, "../..")
+                        parent = fresh_more_link.find_element(By.XPATH, "../..")
                         # Szukaj nazwy w rodzicu
                         name_elements = parent.find_elements(By.CSS_SELECTOR, "h2, h3, h4, strong")
                         for elem in name_elements:
@@ -177,25 +173,8 @@ def get_shop_info_improved(listing_url, treshold=100):
         except:
             pass
 
-        # Określ typ konta
-        # if 'profile_url' in shop_record:
-        #     # Uwaga wrazliwa linia!
-        #     if '/sklepy/' in shop_record['profile_url'] or '.olx.pl/home/' in shop_record['profile_url']:
-        #         shop_record['type'] = 'sklep_premium'
-        #     elif '/oferty/uzytkownik/' in shop_record['profile_url']:
-        #         shop_record['type'] = 'uzytkownik'
 
-    # Określ typ konta - POPRAWIONE
-    #     profile_rec = shop_record.get('profile_url')
-    #     if profile_rec:
-    #         if '/sklepy/' in profile_rec or '.olx.pl/home/' in profile_rec:
-    #             shop_record['type'] = 'sklep_premium'
-    #         elif '/oferty/uzytkownik/' in profile_rec:
-    #             shop_record['type'] = 'uzytkownik'
-    #         else:
-    #             shop_record['type'] = 'nieznany'
-    #     else:
-    #         shop_record['type'] = 'brak_profilu'
+        print(f"  CHECKPOINT 3 (przed return): shop_record = {shop_record}")
 
         return shop_record
 
@@ -215,7 +194,25 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
     "Accept-Language": "pl-PL,pl;q=0.9"
 }
+    # Określ typ konta
+            # if 'profile_url' in shop_record:
+            #     # Uwaga wrazliwa linia!
+            #     if '/sklepy/' in shop_record['profile_url'] or '.olx.pl/home/' in shop_record['profile_url']:
+            #         shop_record['type'] = 'sklep_premium'
+            #     elif '/oferty/uzytkownik/' in shop_record['profile_url']:
+            #         shop_record['type'] = 'uzytkownik'
 
+        # Określ typ konta - POPRAWIONE
+        #     profile_rec = shop_record.get('profile_url')
+        #     if profile_rec:
+        #         if '/sklepy/' in profile_rec or '.olx.pl/home/' in profile_rec:
+        #             shop_record['type'] = 'sklep_premium'
+        #         elif '/oferty/uzytkownik/' in profile_rec:
+        #             shop_record['type'] = 'uzytkownik'
+        #         else:
+        #             shop_record['type'] = 'nieznany'
+        #     else:
+        #         shop_record['type'] = 'brak_profilu'
 
 # === ETAP 1: ZBIERANIE LINKÓW DO OGŁOSZEŃ ===
 def extract_ad_links(driver, category_url, start_page, end_page, test_mode):
@@ -261,8 +258,12 @@ def extract_store_urls(ad_links):
         # 2 sposoby - dodaj URL do setu jeśli istnieje
         # Użyj danych które znalazła funkcja!
         if shop_record and 'profile_url' in shop_record:
-            #store_urls.add(shop_record['profile_url'])
             key_dict = shop_record['profile_url']
+            print(f"   DEBUG: profile_url = {key_dict}")
+            print(f"   DEBUG: ads_count = {shop_record.get('ads_count')}")
+            print(f"   DEBUG: name = {shop_record.get('name')}")
+
+            # Zapisz nawet jeśli profile_url to None - żeby zobaczyć problem
             store_urls[key_dict]=shop_record
             print(f"   Dodano sklep: {key_dict} (typ: {shop_record.get('type', 'nieznany')})")
         #else:
@@ -274,20 +275,25 @@ def extract_store_urls(ad_links):
 
     return store_urls
 
-def ctc_get_olx_ads_count_selenium(shop_url):
+def ctc_get_olx_ads_count_selenium(driver, shop_url):
     """
     Używa Selenium do pobrania liczby ogłoszeń
     """
+    #WQ
+    '''
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
 
     driver = webdriver.Chrome(options=chrome_options)
-
+    '''
+    print(f"Selenium start: {shop_url}")
     try:
         driver.get(shop_url)
-        time.sleep(3)
+        #WQ
+        #time.sleep(3)
+        time.sleep(2)
 
         page_text = driver.find_element(By.TAG_NAME, "body").text
 
@@ -295,39 +301,47 @@ def ctc_get_olx_ads_count_selenium(shop_url):
         if "/oferty/uzytkownik/" in shop_url:
             # Sprawdź czy to nie jest przekierowanie do wszystkich ogłoszeń
             if "wszystkie ogłoszenia w" in page_text.lower():
+                print(f"Selenium end - fail")
                 return 0
 
             match = re.search(r'Znaleźliśmy (\d+) ogłoszeń', page_text)
             if match:
                 count = int(match.group(1))
                 if count > 1000000:
+                    print(f"Selenium end - fail")
                     return 0
+                print(f"Selenium end - good")
                 return count
 
             match = re.search(r'Wszystkie ogłoszenia\s*(\d+)', page_text)
             if match:
                 count = int(match.group(1))
                 if count > 1000000:
+                    print(f"Selenium end - fail")
                     return 0
+                print(f"Selenium end - good")
                 return count
 
             if any(text in page_text for text in ["Brak ogłoszeń", "Nie ma ogłoszeń", "0 ogłoszeń"]):
+                print(f"Selenium end - fail")
                 return 0
 
         driver.quit()
         return None
 
     except Exception as e:
+        print(f"Selenium end - fail")
         driver.quit()
         return None
 
 
-def ctc_get_olx_ads_count(shop_url):
+def ctc_get_olx_ads_count(driver, shop_url):
     """
     Pobiera liczbę ogłoszeń
     """
     resp = requests.get(shop_url, headers=HEADERS)
     if resp.status_code != 200:
+        print(f"Błąd HTTP")
         return None
 
     html = resp.text
@@ -354,11 +368,12 @@ def ctc_get_olx_ads_count(shop_url):
                         return count
 
     elif is_user_page:
-        return ctc_get_olx_ads_count_selenium(shop_url)
+        return ctc_get_olx_ads_count_selenium(driver, shop_url)
 
     if is_shop_page:
-        return ctc_get_olx_ads_count_selenium(shop_url)
+        return ctc_get_olx_ads_count_selenium(driver, shop_url)
 
+    print(f"Nie znaleziono liczby")
     return None
 
 def process_urls_to_xlsx(store_data, output_filename="olx_sellers.xlsx"):
