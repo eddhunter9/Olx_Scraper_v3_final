@@ -24,17 +24,17 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
 # === KONFIGURACJA ===
-#CATEGORY_URL = "https://www.olx.pl/elektronika/komputery/"
+CATEGORY_URL = "https://www.olx.pl/elektronika/komputery/"
 #CATEGORY_URL = "https://www.olx.pl/elektronika/sprzet-agd/"
 #CATEGORY_URL = "https://www.olx.pl/dom-ogrod/ogrod/"
 #CATEGORY_URL = "https://www.olx.pl/uslugi/budowa-remont/"
-CATEGORY_URL = "https://www.olx.pl/elektronika"
+#CATEGORY_URL = "https://www.olx.pl/elektronika"
 #MAX_PAGES    = 3
 START_PAGE=1
 END_PAGE=1
 
 #Tryb testowy - 5 linków i koniec
-TEST_MODE=False
+TEST_MODE=True
 
 # === INICJALIZACJA WEBDRIVERA ===
 def get_webdriver():
@@ -74,22 +74,23 @@ def quick_get_profile_url(listing_url):
             EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, "Więcej od tego ogłoszeniodawcy")) # maja byc podwojne nawiasy okragle!
         )
         profile_url = more_link.get_attribute('href')
-        return profile_url, more_link, driver
+        return profile_url, more_link
 
+    # driver2 return edit None
     except TimeoutException:
         print(f"Timeout - nie znaleziono linku w {listing_url}")
         driver.quit()
-        return None, None, None
+        return None, None
     except Exception as e:
         print(f"Błąd {e}")
         driver.quit()
-        return None, None, None
+        return None, None
     #Bez finally bo nie pobierze nazwy!
     # finally:
     #     driver.quit()
 
 # WQ bez seen:set
-def get_shop_info_improved(listing_url, treshold=100):
+def get_shop_info_improved(driver, listing_url, treshold=100):
     """
     Ulepszona wersja - rozróżnia sklepy premium od zwykłych użytkowników
     """
@@ -109,7 +110,9 @@ def get_shop_info_improved(listing_url, treshold=100):
         # Metoda 1: Szukaj linku "Więcej od tego ogłoszeniodawcy"
         try:
             #WERSJA QUICK
-            profile_url, more_link, driver = quick_get_profile_url(listing_url)
+            #profile_url, more_link, driver = quick_get_profile_url(listing_url)
+            #WERSJA driver2
+            profile_url, more_link= quick_get_profile_url(listing_url)
             print(f"  CHECKPOINT 1: profile_url = {profile_url}")
             # 1) Filtr profilu
             if not profile_url:
@@ -242,7 +245,7 @@ def extract_ad_links(driver, category_url, start_page, end_page, test_mode):
     return list(ad_links)
 
 #WQ bez driver
-def extract_store_urls(ad_links):
+def extract_store_urls(driver, ad_links):
     # WERSJA QUICK - bez duplikatow
     #seen=set()
     store_urls={}
@@ -251,7 +254,7 @@ def extract_store_urls(ad_links):
 
     for ad in ad_links:
         #print(f"🔗 Opening ad: {ad}")
-        shop_record = get_shop_info_improved(ad) #treshold nie trzeba tu podać?
+        shop_record = get_shop_info_improved(driver, ad) #treshold nie trzeba tu podać?
 
         # Dodaj rekord do listy (nawet jeśli niepełny)
         #all_shop_records.append(shop_record)
@@ -466,7 +469,7 @@ def main():
     driver = get_webdriver()
     try:
         ad_links   = extract_ad_links(driver, CATEGORY_URL, START_PAGE, END_PAGE, TEST_MODE)
-        store_data = extract_store_urls(ad_links)
+        store_data = extract_store_urls(driver, ad_links)
 
 
     finally:
